@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Aplikasi Keuangan Harian — Offline</title>
+<meta name="description" content="Aplikasi keuangan harian offline: catat pemasukan & pengeluaran, kategori, ringkasan, export Excel. Single-file untuk hosting."/>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
+<!-- Tailwind via CDN for quick styling -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Chart.js for charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- SheetJS for Excel export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  /* Small extra styles */
+  .glass { background: rgba(255,255,255,0.8); backdrop-filter: blur(6px); }
+  .dark .glass { background: rgba(17,24,39,0.8); color: #e5e7eb; }
+  .app-max { max-width:1200px; margin:0 auto; }
+</style>
+</head>
+<body class="bg-gradient-to-br from-indigo-600 to-purple-600 min-h-screen p-4 text-slate-800">
+<div class="app-max">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between mb-6">
+    <div class="text-white">
+      <h1 class="text-2xl font-bold">Aplikasi Keuangan Harian (Offline)</h1>
+      <p class="text-sm opacity-90">Ringan • Single-file • Export Excel</p>
+    </div>
+    <div class="space-x-2">
+      <button id="btnTheme" class="bg-white/20 text-white px-3 py-2 rounded">Mode Gelap</button>
+      <button id="btnLogout" class="bg-white/20 text-white px-3 py-2 rounded hidden">Logout</button>
+    </div>
+  </header>
+
+  <!-- Main container -->
+  <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Left: Auth & Add Transaction -->
+    <section class="lg:col-span-1">
+      <!-- Auth box -->
+      <div id="authBox" class="glass rounded-xl p-4 shadow">
+        <div id="authForm">
+          <h2 class="font-semibold mb-3">Login</h2>
+          <form id="loginForm" class="space-y-2">
+            <input id="loginUser" placeholder="Username/email" class="w-full p-2 border rounded" required>
+            <input id="loginPass" type="password" placeholder="Password" class="w-full p-2 border rounded" required>
+            <div class="flex gap-2">
+              <button class="w-1/2 bg-indigo-600 text-white p-2 rounded" type="submit">Masuk</button>
+              <button id="showRegister" type="button" class="w-1/2 bg-white text-indigo-700 p-2 rounded">Daftar</button>
+            </div>
+            <p class="text-xs opacity-70 mt-2">Data tersimpan di browser (localStorage). Untuk keamanan produksi gunakan server.</p>
+          </form>
+        </div>
+
+        <div id="registerForm" class="hidden">
+          <h2 class="font-semibold mb-3">Daftar Akun</h2>
+          <form id="formRegister" class="space-y-2">
+            <input id="regUser" placeholder="Username (unik)" class="w-full p-2 border rounded" required>
+            <input id="regPass" type="password" placeholder="Password" class="w-full p-2 border rounded" required>
+            <div class="flex gap-2">
+              <button class="w-1/2 bg-green-600 text-white p-2 rounded" type="submit">Buat Akun</button>
+              <button id="cancelRegister" type="button" class="w-1/2 bg-gray-200 text-gray-700 p-2 rounded">Batal</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Add transaction box (only shown when logged in) -->
+      <div id="txBox" class="glass rounded-xl p-4 shadow mt-4 hidden">
+        <h2 class="font-semibold mb-3">Tambah Transaksi</h2>
+        <form id="txForm" class="space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            <input id="txDate" type="date" class="p-2 border rounded" required>
+            <select id="txType" class="p-2 border rounded">
+              <option value="expense">Pengeluaran</option>
+              <option value="income">Pemasukan</option>
+            </select>
+          </div>
+          <input id="txAmount" type="number" placeholder="Jumlah (Rp)" class="w-full p-2 border rounded" required>
+          <input id="txTitle" placeholder="Judul / Catatan singkat" class="w-full p-2 border rounded" required>
+          <select id="txCategory" class="w-full p-2 border rounded"></select>
+          <div class="flex gap-2">
+            <button type="submit" class="bg-indigo-600 text-white p-2 rounded w-1/2">Simpan</button>
+            <button id="btnQuickCash" type="button" class="bg-white text-indigo-700 p-2 rounded w-1/2">Tambah Cepat</button>
+          </div>
+        </form>
+        <div class="mt-3 text-sm text-slate-600">Kategori: <button id="manageCat" class="text-indigo-600 underline">Kelola</button></div>
+      </div>
+
+      <!-- Category manager modal simple -->
+      <div id="catBox" class="glass rounded-xl p-4 shadow mt-4 hidden">
+        <h2 class="font-semibold mb-2">Kelola Kategori</h2>
+        <div class="flex gap-2 mb-2">
+          <input id="newCat" placeholder="Nama kategori" class="p-2 border rounded flex-1">
+          <button id="addCatBtn" class="bg-green-600 text-white p-2 rounded">Tambah</button>
+        </div>
+        <div id="catList" class="space-y-2 text-sm"></div>
+        <div class="mt-3"><button id="closeCat" class="bg-gray-200 p-2 rounded">Tutup</button></div>
+      </div>
+    </section>
+
+    <!-- Middle: Transactions list and controls -->
+    <section class="lg:col-span-2">
+      <div class="glass rounded-xl p-4 shadow">
+        <!-- Controls -->
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+          <div class="flex gap-2 items-center">
+            <input id="filterFrom" type="date" class="p-2 border rounded">
+            <input id="filterTo" type="date" class="p-2 border rounded">
+            <select id="filterType" class="p-2 border rounded">
+              <option value="">Semua</option>
+              <option value="income">Pemasukan</option>
+              <option value="expense">Pengeluaran</option>
+            </select>
+            <input id="search" placeholder="Cari (judul/kategori)" class="p-2 border rounded">
+            <button id="btnFilter" class="bg-indigo-600 text-white p-2 rounded">Filter</button>
+            <button id="btnReset" class="bg-gray-200 p-2 rounded">Reset</button>
+          </div>
+          <div class="flex gap-2 items-center">
+            <button id="btnExport" class="bg-emerald-600 text-white p-2 rounded">Export Excel</button>
+            <button id="btnImport" class="bg-white p-2 rounded">Import (CSV)</button>
+            <input id="fileImport" type="file" accept=".csv,.xlsx" class="hidden">
+            <div id="summarySmall" class="text-sm"></div>
+          </div>
+        </div>
+
+        <!-- Transactions table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" id="txTable">
+            <thead class="bg-indigo-50"><tr>
+              <th class="p-2 text-left">Tanggal</th><th>Judul</th><th>Kategori</th><th>Jenis</th><th class="text-right">Jumlah</th><th>Aksi</th>
+            </tr></thead>
+            <tbody id="txTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Summary & Chart -->
+      <div class="glass rounded-xl p-4 shadow mt-4">
+        <div class="flex flex-col lg:flex-row gap-4">
+          <div class="flex-1">
+            <h3 class="font-semibold">Ringkasan Bulanan</h3>
+            <div id="monthlySummary" class="mt-2 text-sm"></div>
+          </div>
+          <div class="lg:w-1/2">
+            <canvas id="chart" height="160"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="text-center text-xs text-white/80 mt-6">Single-file offline • Data lokal disimpan di browser • Muhammad Nizar Asagaf</footer>
+</div>
+
+<script>
+/* ===== Data model in localStorage =====
+users: {username:{password:...}} 
+currentUser: username
+data_username_transactions: [ {id,date,type,amount,title,category} ]
+categories_username: [ ... ]
+*/
+
+// Utilities
+const uid = ()=> 'tx-' + Math.random().toString(36).slice(2,9);
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+const fmt = n => 'Rp ' + Number(n).toLocaleString('id-ID');
+
+// Auth functions
+function loadUsers(){ return JSON.parse(localStorage.getItem('keu_users')||'{}'); }
+function saveUsers(u){ localStorage.setItem('keu_users', JSON.stringify(u)); }
+
+function currentUser(){ return localStorage.getItem('keu_current'); }
+function setCurrentUser(u){ localStorage.setItem('keu_current', u); }
+
+function userKey(k){ return 'keu_' + currentUser() + '_' + k; }
+
+function showToast(msg, type='success'){
+  const el = document.createElement('div');
+  el.className = 'mb-2 p-2 rounded shadow ' + (type==='success'?'bg-green-600 text-white':'bg-rose-600 text-white');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(()=> el.remove(), 2500);
+}
+
+// Register / Login UI
+$('#showRegister').addEventListener('click', ()=>{
+  $('#authForm').classList.add('hidden');
+  $('#registerForm').classList.remove('hidden');
+});
+$('#cancelRegister').addEventListener('click', ()=>{
+  $('#registerForm').classList.add('hidden');
+  $('#authForm').classList.remove('hidden');
+});
+
+$('#formRegister').addEventListener('submit', e=>{
+  e.preventDefault();
+  const users = loadUsers();
+  const username = $('#regUser').value.trim();
+  const pass = $('#regPass').value;
+  if(!username || !pass){ alert('Lengkapi data'); return; }
+  if(users[username]){ alert('Username sudah ada'); return; }
+  users[username] = { password: pass };
+  saveUsers(users);
+  showToast('Akun dibuat, silakan login');
+  $('#regUser').value=''; $('#regPass').value='';
+  $('#registerForm').classList.add('hidden'); $('#authForm').classList.remove('hidden');
+});
+
+$('#loginForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const users = loadUsers();
+  const username = $('#loginUser').value.trim();
+  const pass = $('#loginPass').value;
+  if(!users[username] || users[username].password !== pass){ alert('Username / password salah'); return; }
+  setCurrentUser(username);
+  initAfterLogin();
+  showToast('Selamat datang, ' + username);
+});
+
+$('#btnLogout').addEventListener('click', ()=>{
+  if(confirm('Logout?')){ localStorage.removeItem('keu_current'); location.reload(); }
+});
+
+// Data helpers
+function loadTx(){ return JSON.parse(localStorage.getItem(userKey('tx') ) || '[]'); }
+function saveTx(arr){ localStorage.setItem(userKey('tx'), JSON.stringify(arr)); }
+function loadCats(){ return JSON.parse(localStorage.getItem(userKey('cats')) || '[]'); }
+function saveCats(arr){ localStorage.setItem(userKey('cats'), JSON.stringify(arr)); }
+
+// Init default categories for user
+function ensureDefaultCats(){
+  const cats = loadCats();
+  if(cats.length===0){ saveCats(['Makanan','Transport','Gaji','Hiburan','Lain-lain']); }
+}
+
+// UI updates
+function renderCats(){
+  const cats = loadCats();
+  const sel = $('#txCategory'); sel.innerHTML = '';
+  cats.forEach(c=> sel.innerHTML += `<option>${c}</option>`);
+  // render category list for manage
+  $('#catList').innerHTML = cats.map(c=> `<div class="flex justify-between items-center"><div>${c}</div><button class="text-red-600" data-cat="${c}">Hapus</button></div>`).join('');
+  $$('#catList button').forEach(b=> b.addEventListener('click', ()=>{ removeCat(b.dataset.cat); }));
+}
+
+function addCat(name){
+  if(!name) return;
+  const cats = loadCats(); if(cats.includes(name)){ showToast('Kategori sudah ada','error'); return; }
+  cats.push(name); saveCats(cats); renderCats(); showToast('Kategori ditambahkan');
+}
+
+function removeCat(name){
+  if(!confirm('Hapus kategori '+name+' ?')) return;
+  let cats = loadCats(); cats = cats.filter(c=>c!==name); saveCats(cats); renderCats();
+  showToast('Kategori dihapus');
+}
+
+// Transaction CRUD
+$('#txForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const t = {
+    id: uid(),
+    date: $('#txDate').value || new Date().toISOString().slice(0,10),
+    type: $('#txType').value,
+    amount: Math.abs(Number($('#txAmount').value)),
+    title: $('#txTitle').value || '',
+    category: $('#txCategory').value || 'Lain-lain'
+  };
+  if(!t.amount){ alert('Jumlah tidak valid'); return; }
+  const arr = loadTx(); arr.push(t); saveTx(arr); $('#txForm').reset(); renderTable(); updateSummary(); showToast('Transaksi disimpan');
+});
+
+$('#btnQuickCash').addEventListener('click', ()=>{
+  $('#txDate').value = new Date().toISOString().slice(0,10);
+  $('#txType').value = 'income';
+  $('#txAmount').value = 100000;
+  $('#txTitle').value = 'Pemasukan Cepat';
+  $('#txCategory').value = loadCats()[0] || 'Lain-lain';
+});
+
+// Manage categories UI
+$('#manageCat').addEventListener('click', ()=>{ $('#catBox').classList.toggle('hidden'); });
+$('#addCatBtn').addEventListener('click', ()=>{ addCat($('#newCat').value.trim()); $('#newCat').value=''; });
+$('#closeCat').addEventListener('click', ()=>{ $('#catBox').classList.add('hidden'); });
+
+// Render transactions table
+function renderTable(list=null){
+  const data = list || loadTx();
+  const tbody = $('#txTbody'); tbody.innerHTML = '';
+  if(data.length===0){ tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-sm text-slate-600">Belum ada transaksi</td></tr>'; return; }
+  data.sort((a,b)=> new Date(b.date) - new Date(a.date));
+  data.forEach(t=>{
+    tbody.innerHTML += `<tr class="border-b"><td class="p-2">${t.date}</td><td class="p-2">${t.title}</td><td class="p-2">${t.category}</td><td class="p-2">${t.type}</td><td class="p-2 text-right">${fmt(t.amount)}</td><td class="p-2"><button class="text-sm text-blue-600" data-id="${t.id}" onclick="editTx('${t.id}')">Edit</button> | <button class="text-sm text-red-600" onclick="delTx('${t.id}')">Hapus</button></td></tr>`;
+  });
+}
+
+function editTx(id){
+  const arr = loadTx(); const t = arr.find(x=>x.id===id); if(!t) return;
+  // simple inline edit prompt (lightweight)
+  const newAmt = prompt('Jumlah (Rp)', t.amount); if(newAmt===null) return;
+  t.amount = Math.abs(Number(newAmt)) || t.amount;
+  t.title = prompt('Judul', t.title) || t.title;
+  saveTx(arr); renderTable(); updateSummary(); showToast('Transaksi diperbarui');
+}
+
+function delTx(id){
+  if(!confirm('Hapus transaksi?')) return;
+  let arr = loadTx(); arr = arr.filter(x=>x.id!==id); saveTx(arr); renderTable(); updateSummary(); showToast('Transaksi dihapus');
+}
+
+// Filters
+$('#btnFilter').addEventListener('click', ()=>{
+  const from = $('#filterFrom').value ? new Date($('#filterFrom').value) : null;
+  const to = $('#filterTo').value ? new Date($('#filterTo').value) : null;
+  const type = $('#filterType').value;
+  const q = $('#search').value.toLowerCase();
+  const data = loadTx().filter(t=>{
+    const d = new Date(t.date);
+    if(from && d < from) return false;
+    if(to && d > to) return false;
+    if(type && t.type !== type) return false;
+    if(q && !(t.title.toLowerCase().includes(q) || t.category.toLowerCase().includes(q))) return false;
+    return true;
+  });
+  renderTable(data); updateSummary(data);
+});
+$('#btnReset').addEventListener('click', ()=>{ $('#filterFrom').value=''; $('#filterTo').value=''; $('#filterType').value=''; $('#search').value=''; renderTable(); updateSummary(); });
+
+// Export to Excel (SheetJS)
+$('#btnExport').addEventListener('click', ()=>{
+  const data = loadTx();
+  if(data.length===0){ alert('Tidak ada data untuk diexport'); return; }
+  const flat = data.map(d=>({Tanggal:d.date, Judul:d.title, Kategori:d.category, Jenis:d.type, Jumlah:d.amount}));
+  const ws = XLSX.utils.json_to_sheet(flat);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Transaksi');
+  const fname = 'keuangan_' + (currentUser()||'anon') + '.xlsx';
+  XLSX.writeFile(wb, fname);
+  showToast('Export Excel selesai');
+});
+
+// Import CSV/XLSX (basic)
+$('#btnImport').addEventListener('click', ()=> $('#fileImport').click());
+$('#fileImport').addEventListener('change', ev=>{
+  const f = ev.target.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const data = e.target.result;
+    let arr = loadTx();
+    if(f.name.endsWith('.csv')){
+      // simple CSV parse: expect header Tanggal,Judul,Kategori,Jenis,Jumlah
+      const lines = data.split(/\r?\n/).filter(Boolean);
+      const header = lines.shift().split(',');
+      lines.forEach(line=>{
+        const cols = line.split(',');
+        const obj = {};
+        header.forEach((h,i)=> obj[h.trim()] = cols[i] ? cols[i].trim() : '');
+        arr.push({ id: uid(), date: obj.Tanggal || new Date().toISOString().slice(0,10), title: obj.Judul||'', category: obj.Kategori||'Lain-lain', type: obj.Jenis||'expense', amount: Number(obj.Jumlah||0) });
+      });
+      saveTx(arr); renderTable(); updateSummary(); showToast('Import CSV selesai');
+    } else {
+      const wb = XLSX.read(data, {type:'binary'});
+      const wsname = wb.SheetNames[0]; const ws = wb.Sheets[wsname];
+      const json = XLSX.utils.sheet_to_json(ws);
+      json.forEach(row=> arr.push({ id: uid(), date: row.Tanggal || new Date().toISOString().slice(0,10), title: row.Judul||row.Title||'', category: row.Kategori||row.Category||'Lain-lain', type: row.Jenis||row.Type||'expense', amount: Number(row.Jumlah||row.Amount||0) }) );
+      saveTx(arr); renderTable(); updateSummary(); showToast('Import XLSX selesai');
+    }
+  };
+  if(f.name.endsWith('.csv')) reader.readAsText(f);
+  else reader.readAsBinaryString(f);
+});
+
+// Summary & Chart
+let chartInst = null;
+function updateSummary(list=null){
+  const data = list || loadTx();
+  const month = new Date().toISOString().slice(0,7); // yyyy-mm
+  let income=0, expense=0;
+  const map = {};
+  data.forEach(t=>{
+    if(t.date.slice(0,7) === month){
+      if(t.type==='income') income += Number(t.amount); else expense += Number(t.amount);
+    }
+    // category summary
+    map[t.category] = (map[t.category]||0) + (t.type==='income'? Number(t.amount): -Number(t.amount));
+  });
+  $('#summarySmall').innerText = `Bulan ini: ${fmt(income)} masuk • ${fmt(expense)} keluar • Saldo: ${fmt(income-expense)}`;
+  // monthly summary block
+  const el = $('#monthlySummary');
+  const rows = Object.keys(map).map(k=> `<div class="flex justify-between"><div>${k}</div><div>${fmt(map[k])}</div></div>`).join('');
+  el.innerHTML = rows || '<div class="text-sm text-slate-600">Belum ada data</div>';
+  // chart: last 12 days totals (or months if small)
+  const labels = []; const values = [];
+  // choose last 12 days
+  for(let i=11;i>=0;i--){
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = d.toISOString().slice(0,10);
+    labels.push(key);
+    const s = data.filter(t=>t.date===key).reduce((a,b)=> a + (b.type==='income'?b.amount:-b.amount),0);
+    values.push(s);
+  }
+  const ctx = document.getElementById('chart').getContext('2d');
+  if(chartInst) chartInst.destroy();
+  chartInst = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Neto per hari (Rp)', data: values }] }, options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ ticks:{ callback:v=> 'Rp ' + Number(v).toLocaleString() } } } } });
+}
+
+// Simple initialization after login
+function initAfterLogin(){
+  // UI changes
+  $('#authBox').classList.add('hidden');
+  $('#btnLogout').classList.remove('hidden');
+  $('#txBox').classList.remove('hidden');
+  $('footer').classList.remove('hidden');
+  ensureDefaultCats(); renderCats(); renderTable(); updateSummary(); $('#btnTheme').textContent = 'Mode Gelap';
+}
+
+// If user already logged in
+if(currentUser()){ initAfterLogin(); showToast('Masuk sebagai '+currentUser()); }
+
+// Theme toggle
+let dark=false;
+$('#btnTheme').addEventListener('click', ()=>{
+  dark = !dark; document.documentElement.classList.toggle('dark', dark);
+  $('#btnTheme').textContent = dark? 'Mode Terang':'Mode Gelap';
+});
+
+// Manage after login UI visibility when page reload with active user
+document.addEventListener('DOMContentLoaded', ()=>{
+  if(currentUser()){ $('#authBox').classList.add('hidden'); $('#btnLogout').classList.remove('hidden'); $('#txBox').classList.remove('hidden'); ensureDefaultCats(); renderCats(); renderTable(); updateSummary(); }
+});
+
+// Edit/Delete handlers bound globally
+window.editTx = editTx;
+window.delTx = delTx;
+
+</script>
+</body>
+</html>
